@@ -1,0 +1,321 @@
+---
+title: "Coursera Data Science Capstone Project - Milestone Report"
+author: "Amudha Narayanan"
+output: html_document
+---
+
+##Introduction
+
+This is the Milestone Report for the Coursera Data Science Capstone project. The goal of the capstone project is to create a predictive text model using optimal sample size text corpus of documents as training data. Natural language processing(NLP) techniques will be used to perform the analysis and build the predictive model.
+
+This milestone report describes the major features of the training data with our exploratory data analysis and summarizes our plans for creating the predictive model.
+
+
+##Data Source
+
+The data for this project is obtained from Coursera; the original source from [HC Corpora](http://www.corpora.heliohost.org/). The dataset contains text files of news & blog entires as well as tweets in four different languages, English, German, Russian and Finish. The files based on English (`en_US`) are used for this project.
+
+## Basic Data Summary
+The dataset which was downloaded comprises three files which contains texts mined from blogs, news and Twitter sources. I loaded the complete dataset into R and performed exploratory study of original raw data and processed sampled data as summarized below:
+
+###Raw Data
+
+```{r, echo=FALSE,cache=TRUE}
+library(stringi)
+library(knitr)
+opts_chunk$set(echo=FALSE)
+setwd("C:/Coursera/Capstone/Data/en_US")
+blogs <- readLines("en_US.blogs.txt", encoding = "UTF-8", skipNul = TRUE)
+con <- file("en_US.news.txt", open="rb")
+news <- readLines(con, encoding="UTF-8", skipNul = TRUE)
+close(con)
+rm(con)
+#news <- readLines("en_US.news.txt", encoding = "UTF-8", skipNul = TRUE)
+twitter <- readLines("en_US.twitter.txt", encoding = "UTF-8", skipNul = TRUE)
+
+
+
+# Get file sizes
+blogs.size <- file.info("en_US.blogs.txt")$size / 1024 ^ 2
+news.size <- file.info("en_US.news.txt")$size / 1024 ^ 2
+twitter.size <- file.info("en_US.twitter.txt")$size / 1024 ^ 2
+
+# Get words in files
+blogs.words <- stri_count_words(blogs)
+news.words <- stri_count_words(news)
+twitter.words <- stri_count_words(twitter)
+
+# Summary of the data sets
+summaryTable <- data.frame(source = c("blogs", "news", "twitter"),
+           file.size.MB = c(blogs.size, news.size, twitter.size),
+           num.lines = c(length(blogs), length(news), length(twitter)),
+           num.words = c(sum(blogs.words), sum(news.words), sum(twitter.words)),
+           avg.num.char = c(mean(nchar(blogs)),mean(nchar(news)),mean(nchar(twitter))),
+           min.num.char = c(min(nchar(blogs)),min(nchar(news)),min(nchar(twitter))),
+           max.num.char = c(max(nchar(blogs)),max(nchar(news)),max(nchar(twitter)))
+           )
+
+knitr::kable(summaryTable)
+
+```
+### Findings 
+* Files are very large with huge volume of data,shows that we need to obtain random sample data
+* The minimum character counts of 0 and 1 show that the files contain some meaningless text
+* The maximum character count of 421 for Twitter shows that it contains at least one line which exceeds the expected character limit of 142
+
+
+### Sampled data sets
+We create a sample of the data via random sampling as it would be not feasible to load the whole content of the files in our dataset via the Corpus function.
+
+This is necessary to reduce the time needed for pre-processing and cleaning the data as well as tokenizing the words of a corpus into different n-grams. 
+ 
+A next point we have to be aware of is R's limitation to the available RAM.
+
+```{r, echo=FALSE,cache=TRUE}
+
+# Binomial sampling of the data and create the relevant files
+sample.fun <- function(data, percent)
+{
+  return(data[as.logical(rbinom(length(data),1,percent))])
+}
+
+# Set the desired sample percentage or 
+#set percentage as different value for each sample type
+percentage <- 3
+
+sample.blogs   <- sample.fun(blogs, percentage)
+sample.news   <- sample.fun(news, percentage)
+sample.twitter   <- sample.fun(twitter, percentage)
+
+sample.blogs.words <- stri_count_words(sample.blogs)
+sample.news.words <- stri_count_words(sample.news)
+sample.twitter.words <- stri_count_words(sample.twitter)
+
+# Summary of the sample data sets
+sample.summaryTable <- data.frame(source = c("sample.blogs", "sample.news", "sample.twitter"),
+           num.lines = c(length(sample.blogs), length(sample.news), length(sample.twitter)),
+           num.words = c(sum(sample.blogs.words), sum(sample.news.words), sum(sample.twitter.words)),
+           avg.num.char = c(mean(nchar(sample.blogs)),mean(nchar(sample.news)),mean(nchar(sample.twitter))),
+           min.num.char = c(min(nchar(sample.blogs)),min(nchar(sample.news)),min(nchar(sample.twitter))),
+           max.num.char = c(max(nchar(sample.blogs)),max(nchar(sample.news)),max(nchar(sample.twitter)))
+           )
+
+knitr::kable(sample.summaryTable)
+```
+
+
+## Cleaning the data
+
+Before we continue to build the corpus structure, we conduct a preliminary data cleaning. Especially the Twitter text body will likely contain many unwanted character sequences which are not desirable for our corpora. Therefore, we apply 
+the build in functions of the tm package in order to clean the text of the sample dataset.
+
+* Case Conversion: Format and convert all of the text to lowercase. This will help to flatten all references to the same usage.
+
+
+* Removing punctuation: We can remove all the punctuation from a corpus. This is a common procedure in order to avoid cases where the same word has different punctuation applied next to it, but is essentially the same word.
+
+
+* Removing numbers: One can remove all the numbers from a given corpus. Specific numbers in text are not comparable since here is no context to apply to decide whether a number is being used in the same fashion from one instance to another.
+
+
+* Removing whitespaces: Removing whitespaces has little to do with standard text mining. This procedure is not essential for the analysis within the tm package. However, it provides a way to clean up ones intermediary results for better presentation.
+
+
+* Remove profanity words: Swear word have should be completely removed because swear words do not help the prediction. They are offensive  Possible source of a list of profanity words: https://code.google.com/p/badwordslist/downloads/detail?name=badwords.txt.
+
+
+* Removing stop words: The idea is to remove all the short English words that bear no additional meaning to an analysis. Stop words are words like "the" and "and". If one is purely interested in analyzing the meaning of a text, they add no additional value.
+
+
+All of the above cleaning operation on the corpus do not have to occur. It depends on the intended use of the corpus. It is more meaningful to normalize the text as much as possible
+
+```{r, echo=FALSE,cache=TRUE, results='hide'}
+library(tm)
+library(ggplot2)
+library(RWeka)
+library(SnowballC)
+library(wordcloud)
+
+# Remove all non english characters as they cause issues down the road
+sample.blogs <- iconv(sample.blogs, "latin1", "ASCII", sub="")
+sample.news <- iconv(sample.news, "latin1", "ASCII", sub="")
+sample.twitter <- iconv(sample.twitter, "latin1", "ASCII", sub="")
+
+
+
+sample.corpus <- c(sample.blogs,sample.news,sample.twitter)
+my.corpus <- Corpus(VectorSource(list(sample.corpus)))
+```
+
+
+
+```{r, echo=FALSE,cache=TRUE}
+
+#Now that we have our corpus item, we need to clean it. In order to do that, we #will transform all characters to lowercase, we will remove the punctuation, #remove the numbers and the common english stopwords (and, the, or etc..)
+my.corpus <- tm_map(my.corpus, content_transformer(tolower))
+my.corpus <- tm_map(my.corpus, removePunctuation)
+my.corpus <- tm_map(my.corpus, removeNumbers)
+
+```
+
+
+
+```{r, echo=FALSE,cache=TRUE}
+# Remove profanity -Used the google badwords database.
+
+download.file("http://badwordslist.googlecode.com/files/badwords.txt", "googlebadwords.txt", mode="wb")
+googlebadwords <- read.table(file = "googlebadwords.txt",header = F,as.is = T)
+#googlebadwords <- googlebadwords[,1]
+googlebadwords <- gsub("[*()]","",googlebadwords[,1])
+my.corpus <- tm_map(my.corpus, removeWords, googlebadwords)
+```
+
+
+
+
+```{r, echo=FALSE,cache=TRUE}
+# we will strip the excess white space
+my.corpus <- tm_map(my.corpus, stripWhitespace)
+```
+
+
+
+## Analyzing the distributions of word frequencies
+Generating a word cloud allows for an easy way to get a feel for what is in the created corpus.It is of little surprise from the word cloud that the most common words in the file are the most common stop words in english.
+
+```{r, echo=FALSE,cache=TRUE}
+wordcloud(my.corpus, scale=c(4,0.2), max.words=75, random.order=FALSE, rot.per=0.35, use.r.layout=FALSE, colors=brewer.pal(8, "Dark2"))
+
+# Finally ,remove the meaning less stop words of English
+my.corpus <- tm_map(my.corpus, removeWords, stopwords("english"))
+```
+
+Get the final optimized corpus from the sample dataset by removing all the short English words that bear no additional meaning to an analysisis. Planning to use * N-gram /Tokenizing* NLP tecniques to predict text using created corpus as reference dictionary
+
+### N-gram Tokenizing
+*N-gram* is a contiguous sequence of n items from a given sequence of text or speech.*Tokenizing* is the process of breaking up text into pieces (tokens) to be used in NLP. We tokenized the sample text to find the most common n-grams or most common series of n words. For this initial analysis we looked at unigrams (1 word) to get the most common words in the text, bigrams (2 word combinations), trigram (3 word combinations) . 
+
+Using the sentence below as an example:
+  
+  *A quick brown fox jumps over the fence.*
+
+The associated 2-grams are: "A quick", "quick brown", "brown fox", "fox jumps", "jumps over", "over the", "the fence". By extending this idea, the 3-grams are: "A quick brown", "quick brown fox", "brown fox jumps", "fox jumps over", "jumps over the", "over the fence"
+
+The application that we are building relies extensively on the concept of n-gram as the word that we are trying to predict relies on the word(s) that precede(s) it.It would be interesting and helpful to find the most frequently occurring words in the data. Below are graphs of the 30 most common unigrams, bigrams, and trigrams for the sampled dataset
+
+```{r,echo=FALSE, cache=TRUE}
+
+options(mc.cores=1)
+
+getFreq <- function(tdm) {
+  freq <- sort(rowSums(as.matrix(tdm)), decreasing = TRUE)
+  return(data.frame(word = names(freq), freq = freq))
+}
+
+bigram <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+trigram <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+makePlot <- function(data, label) {
+  ggplot(data[1:30,], aes(reorder(word, -freq), freq)) +
+         labs(x = label, y = "Frequency") +
+         theme(axis.text.x = element_text(angle = 60, size = 12, hjust = 1)) +
+         geom_bar(stat = "identity", fill = I("orange"))
+}
+
+# Get frequencies of most common n-grams in data sample
+freq1 <- getFreq(removeSparseTerms(TermDocumentMatrix(my.corpus), 0.9999))
+freq2 <- getFreq(removeSparseTerms(TermDocumentMatrix(my.corpus, control = list(tokenize = bigram)), 0.9999))
+freq3 <- getFreq(removeSparseTerms(TermDocumentMatrix(my.corpus, control = list(tokenize = trigram)), 0.9999))
+
+### Top 30 Uni-grams
+makePlot(freq1, "30 Most Common Unigrams")
+
+### Top 30 Bi-grams
+makePlot(freq2, "30 Most Common bigrams")
+
+### Top 30 Tri-grams
+makePlot(freq3, "30 Most Common trigrams")
+
+```
+
+### Word Coverage
+Word coverage refer to number of unique words required for n% text coverage.To accomplish this we will iterate over all sorted and summarized single words of our sample corpus and stop if we reached a limit. This limit is the given coverage times our total word count. The iterated number gives us the number of words we will need to cover the given percentage.
+
+Now let’s see in a plot how the coverage distribution could look like:
+
+```{r, echo=FALSE,cache=TRUE}
+#Word Coverage
+unigrams <- NGramTokenizer(my.corpus, Weka_control(min = 1, max = 1))
+
+uni<-data.frame(table(unigrams),stringsAsFactors = FALSE)
+uniSorted <- uni[order(uni$Freq,decreasing = TRUE),]
+
+
+wordspct <- function(targetpct) {
+    totalWordsUsed <- sum(uniSorted$Freq)
+    pctneeded = 0
+    cumsum = 0
+    i = 1
+    while (pctneeded < targetpct)
+    {
+    cumsum = cumsum + uniSorted$Freq[i]
+    pctneeded = cumsum/totalWordsUsed
+    i = i + 1
+    }
+    return(i)
+}
+
+coverage.percentage <- c(10,20,30,40,50,60,70,80,90)
+words.count <- c(wordspct(0.1),wordspct(0.2),wordspct(0.3),wordspct(0.4),wordspct(0.5),wordspct(0.6),wordspct(0.7),wordspct(0.8),wordspct(0.9))
+
+qplot(coverage.percentage,words.count, geom=c("line","point")) + geom_text(aes(label=words.count), hjust=1.2, vjust=-0.4) + scale_x_discrete(breaks=c(10,20,30,40,50,60,70,80,90), labels=c(10,20,30,40,50,60,70,80,90))
+
+```
+
+```{r, eval=FALSE,cache=TRUE}
+ggplot(data=coverage.percentage, aes(x=xlab, y=words.count)) +
+    geom_line() +
+    geom_point() +
+    scale_x_continuous(breaks = xlab) +
+    geom_text(aes(label=word_count), hjust = 1.2, vjust = -0.4) +
+    geom_vline(xintercept = 50, color="red") +
+    geom_hline(aes(yintercept=140), color="red") +
+    geom_vline(xintercept = 90, color="blue") +
+    geom_hline(aes(yintercept=7777), color="blue") +
+    xlab("Coverage in percent") +
+    ylab("word count") +
+    ggtitle("Word count to cover all word instances")
+```
+
+It can be seen that our word count coverage is not linear. It increases exponentially with increasing percentage. For every 10% between 10% and 60% the amount of needed words approximately doubles and for higher percentages it needs more than twice as many.
+
+## Next Step
+We now present what our predictive Shiny app will consist of and briefly describe an initial algorithm.
+
+The User Interface (UI) part of the Shiny app will consist of a textInput widget where English text could be typed or pasted into by the user. Below the textInput widget, a submitButton or actionButton widget will enable the user to send the text to the predictive algorithm, in order to retrieve the most likely words to follow the given text. 
+
+The Shiny app server algorithm will receive the typed or pasted text and perform the following actions:
+* 1.Convert to lowercase
+* 2.Remove non-ASCII characters
+* 3.Remove numbers
+* 4.Remove punctuation
+* 5.Remove English stop words
+* 6.Remove extra white spaces
+* 7.Search the last 2 words in the trigrams and retrieve the top-3 or top-5 final words of matching patterns to send back to the UI
+* 8.If not found, search the last word in bigrams an retrieve the top-3 or top-5 final words of matching patterns to send back to the UI
+* 9.If not found, use smoothed probabilities to estimate the most likely words to follow
+* 10.If not found, use backoff models to estimate the probability of unobserved n-grams
+
+The main challenge is to improve performance in predicting text efficiently in short runtime with mimimum RAM or with optimized usage of RAM by training the model with a sampled data set.
+
+
+## Conclusion
+
+We have done initial data exploratory on the corpus provided. It provides knowledge and understanding on how we can proceed on to develop the model for the final shiny web application  with optimize runtime performance, RAM size (memory needed) and accuracy of prediction.
+
+
+## Appendix - Code 
+
+```{r appendix, echo=TRUE, eval=FALSE, ref.label=all_labels()}
+
+```
+
