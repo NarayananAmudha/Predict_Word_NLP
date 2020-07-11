@@ -1,9 +1,8 @@
 # Predict_Word_NLP
-Natural language processing(NLP) techniques used to perform the analysis and build the predictive model.
+In this project Natural language processing(NLP) techniques used to perform the analysis and build the predictive model.
 [Word Predictor](https://amudhanarayanan.shinyapps.io/word-predict/)
 
 ## Overview
-## ========================================================
 **Goal** - To build smart shiny app to predict next word/phrase for mobile device using optimized prediction engine.
 
 ## Tools/Lib Used and Reference Links
